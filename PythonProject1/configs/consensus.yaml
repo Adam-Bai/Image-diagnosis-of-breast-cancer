@@ -1,0 +1,59 @@
+version: 1.0
+project: breast_cancer_diagnosis
+experiment: consensus_tri_expert
+seed: 42
+paths:
+  ckpt_expert_a: checkpoints/expert_a/best.pt
+  ckpt_expert_b: checkpoints/expert_b/best.pt
+  ckpt_expert_c: checkpoints/expert_c/best.pt
+  calib_csv: data/calibration/tri_expert_probs.csv
+  out_dir: outputs/consensus
+consensus:
+  classification:
+    policy: majority_2_of_3
+    thresholds:
+      strict: 0.8
+      balanced: 0.6
+      sensitive: 0.4
+    min_agreement_prob: 0.55
+    require_calibrated: true
+  detection:
+    enabled: false
+    method: wbf
+    iou: 0.5
+    score_thresh: 0.05
+  stacking_meta:
+    enabled: true
+    model: logistic_regression
+    features:
+      - A_logit
+      - B_logit
+      - C_logit
+      - A_var
+      - B_var
+      - C_var
+      - IoU_AB
+      - IoU_AC
+      - IoU_BC
+    cv_folds: 5
+uncertainty:
+  tta:
+    enabled: true
+    n_aug: 4
+  mc_dropout:
+    enabled: true
+    n_samples: 20
+  high_var_threshold: 0.08
+reporting:
+  decision_modes:
+    strict_mode: sentinel_guard
+    balanced_mode: standard_consensus
+    sensitive_mode: rescue_watch
+  export:
+    save_per_case_json: true
+    save_summary_csv: true
+    save_visualizations: true
+reproducibility:
+  seed: 42
+  cudnn_deterministic: false
+  cudnn_benchmark: true
