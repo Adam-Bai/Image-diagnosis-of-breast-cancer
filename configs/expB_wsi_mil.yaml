@@ -1,0 +1,106 @@
+version: 1.0
+project: breast_wsi_proto_graph
+experiment: expB_wsi_mil
+seed: 42
+paths:
+  data_root: /data/wsi
+  slide_index_csv: /data/wsi/slide_index.csv
+  train_index_csv: /data/wsi/splits/train.csv
+  val_index_csv: /data/wsi/splits/val.csv
+  test_index_csv: /data/wsi/splits/test.csv
+  tile_lmdb_root: /data/wsi/tiles_lmdb
+  ckpt_dir: /checkpoints/expB
+  log_dir: /logs/expB
+hardware:
+  device: cuda
+  num_workers: 8
+  precision: 16
+  gpus: [0]
+datamodule:
+  patch_size: 256
+  patch_stride: 128
+  bag_size: 96
+  scales:
+    - 5
+    - 10
+    - 20
+  max_bags_per_slide: 32
+  batch_size: 4
+  num_workers: 8
+  sampler:
+    type: hard_example
+    hard_ratio: 0.3
+  filter:
+    min_tissue_ratio: 0.4
+    max_white_ratio: 0.6
+model:
+  name: expB_proto_graph_mil
+  patch_encoder:
+    backbone: convnext_tiny
+    backbone_pretrained: imagenet
+    frozen_until: layer2
+    embed_dim: 768
+  proto_pooling:
+    per_scale_k: 32
+    learnable: true
+    proj_dim: 256
+    normalize: true
+  graph_transformer:
+    layers: 2
+    heads: 4
+    dropout: 0.1
+  mil_transformer:
+    layers: 3
+    heads: 6
+    dropout: 0.1
+    attn_pooling_type: tanh_softmax
+  loss:
+    ce: 1.0
+    sparsity_l1: 0.0001
+    diversity: 0.00005
+    contrastive_topk: 0.1
+    focal_gamma: 2.0
+train:
+  epochs: 80
+  optimizer:
+    name: adamw
+    lr: 0.0003
+    weight_decay: 0.0001
+    betas: [0.9, 0.999]
+    eps: 1.0e-08
+  scheduler:
+    name: cosine
+    warmup_epochs: 5
+    min_lr: 1.0e-05
+  callbacks:
+    early_stopping:
+      enabled: true
+      monitor: val_auroc
+      mode: max
+      patience: 10
+    model_checkpoint:
+      monitor: val_auroc
+      mode: max
+      save_top_k: 3
+      filename: expB-best-{epoch}-{val_auroc:.4f}
+  logging:
+    wandb: true
+    tensorboard: true
+evaluation:
+  metrics:
+    - accuracy
+    - auroc
+    - f1
+  tta:
+    enabled: true
+    scales:
+      - 5
+      - 10
+      - 20
+  export_attn:
+    enabled: true
+    out_dir: /outputs/attn_maps
+    topk_patches: 10
+reproducibility:
+  cudnn_deterministic: true
+  cudnn_benchmark: false
