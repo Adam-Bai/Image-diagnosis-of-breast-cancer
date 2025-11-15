@@ -1,0 +1,125 @@
+version: "1.0"
+project: ImageDiagnosisBreastCancer
+experiment: expC_trifusion
+seed: 42
+paths:
+  data_root: data/
+  train_csv: data/splits/train.csv
+  val_csv: data/splits/val.csv
+  test_csv: data/splits/test.csv
+  vision_feat_root: data/vision_features/expC
+  text_cache_dir: cache/text
+  ckpt_dir: outputs/checkpoints/expC
+  log_dir: outputs/logs/expC
+hardware:
+  device: cuda
+  num_workers: 8
+  precision: "16-mixed"
+  gpus: 1
+datamodule:
+  batch_size: 32
+  num_workers: 8
+  modalities_included:
+    vision: true
+    text: true
+    tabular: true
+  vision:
+    img_size: 224
+    from_expert_a: true
+    feat_dim: 1024
+  text:
+    encoder_name: biomedclip
+    max_length: 128
+    lowercase: false
+    cache_dir: cache/text
+  tabular:
+    continuous_cols:
+      - age
+      - tumor_size
+      - density_score
+      - hormone_level
+    categorical_cols:
+      - biopsy_type
+      - family_history
+      - menopausal_status
+    target_col: diagnosis
+    missing_mask: true
+model:
+  name: TriFusionCLIPTab
+  vision_encoder:
+    from_expA: true
+    finetune_lr_mult: 0.2
+    frozen_stages: 2
+  text_encoder:
+    encoder: biomedclip
+    use_projection: true
+    proj_dim: 384
+  tabular_encoder:
+    type: tabtransformer
+    d_token: 64
+    n_layers: 3
+    dropout: 0.1
+  fusion:
+    type: cross_modal_transformer
+    layers: 2
+    heads: 4
+    gating: soft
+    hidden_dim: 512
+    dropout: 0.1
+  losses:
+    ce: 1.0
+    clip_like_contrast: 0.1
+    modality_dropout: 0.05
+  calibration:
+    temperature_scaling: true
+    confidence_head: true
+train:
+  epochs: 70
+  optimizer:
+    name: AdamW
+    lr: 0.0003
+    weight_decay: 0.0001
+    betas:
+      - 0.9
+      - 0.999
+    eps: 1.0e-08
+  scheduler:
+    name: cosine
+    warmup_epochs: 5
+    min_lr: 1.0e-05
+  callbacks:
+    early_stopping:
+      enabled: true
+      monitor: val_auroc
+      mode: max
+      patience: 10
+    model_checkpoint:
+      monitor: val_auroc
+      mode: max
+      save_top_k: 2
+      filename: expC-trifusion-{epoch:02d}-{val_auroc:.4f}
+  logging:
+    wandb: true
+    tensorboard: true
+evaluation:
+  metrics:
+    - val_auroc
+    - val_pr_auc
+    - f1
+    - accuracy
+  multimodal_ablation:
+    enabled: true
+  tta:
+    enabled: false
+inference:
+  threshold_default: 0.5
+  thresholds:
+    strict: 0.65
+    balanced: 0.5
+    sensitive: 0.35
+  export_risk_report:
+    enabled: true
+    out_dir: reports/risk
+reproducibility:
+  cudnn_deterministic: true
+  cudnn_benchmark: false
