@@ -1,0 +1,100 @@
+version: 1.0
+project: mammography_diagnosis
+experiment: expA_mammo_hybrid
+seed: 42
+paths:
+  data_root: ${env:DATA_ROOT,"data/"}
+  train_csv: ${env:TRAIN_CSV,"metadata/train.csv"}
+  val_csv: ${env:VAL_CSV,"metadata/val.csv"}
+  test_csv: ${env:TEST_CSV,"metadata/test.csv"}
+  ckpt_dir: outputs/checkpoints/expA
+  log_dir: outputs/logs/expA
+hardware:
+  device: gpu
+  num_workers: 8
+  precision: 16
+  gpus: [0]
+datamodule:
+  img_size: [224, 384]
+  views: [L-CC, R-CC, L-MLO, R-MLO]
+  pair_strategy: lr_view_grouping
+  batch_size: 8
+  augment:
+    horizontal_flip: true
+    rotation_deg: 5
+    clahe:
+      clip_limit: 2.0
+      tile_grid_size: [8, 8]
+    normalize:
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+model:
+  backbone: inceptionnext_tiny
+  backbone_pretrained: true
+  projector:
+    type: conv_adapter
+    out_dim: 768
+  transformer:
+    type: swin_t
+    depth: 4
+    num_heads: 6
+    embed_dim: 768
+  cross_view_deform_attn:
+    layers: 3
+    heads: 6
+    n_points: 4
+  quadrant_prior: true
+  head:
+    type: cls_pooler
+    num_classes: 2
+    hidden_dim: 768
+    dropout: 0.3
+  regularization:
+    label_smoothing: 0.1
+    droppath: 0.2
+  detection_branch:
+    enabled: false
+train:
+  epochs: 80
+  optimizer:
+    name: AdamW
+    lr: 0.0003
+    weight_decay: 0.0001
+    betas: [0.9, 0.999]
+    eps: 1.0e-08
+  scheduler:
+    name: cosine
+    warmup_epochs: 5
+    min_lr: 1.0e-05
+  loss:
+    ce: 1.0
+    xview_consistency: 0.5
+  callbacks:
+    early_stopping:
+      enabled: true
+      monitor: val_auroc
+      mode: max
+      patience: 10
+    model_checkpoint:
+      monitor: val_auroc
+      mode: max
+      save_top_k: 3
+      filename: expA-{epoch:02d}-{val_auroc:.4f}
+  logging:
+    wandb: true
+    tensorboard: true
+evaluation:
+  metrics: [auroc, sensitivity, specificity]
+  tta:
+    enabled: true
+    hflip: true
+    rotate: [0, 90]
+inference:
+  threshold_default: 0.5
+  thresholds:
+    strict: 0.7
+    balanced: 0.5
+    sensitive: 0.3
+reproducibility:
+  cudnn_deterministic: true
+  cudnn_benchmark: false
